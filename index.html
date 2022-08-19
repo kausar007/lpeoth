@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon"
+    href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ctext%20x='0'%20y='14'%3E🧑🏽‍💻%3C/text%3E%3C/svg%3E"
+    type="image/svg+xml" />
+  <title>Logseq Page Export OPML to HTML</title>
+  <style>
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      background-color: rgb(250, 250, 250);
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100%;
+    }
+
+    #main {
+      margin: auto;
+      width: 640px;
+    }
+
+    textarea {
+      font-family: 'Courier New', Courier, monospace;
+      width: 100%;
+      height: 200px;
+    }
+
+    button {
+      margin-top: 10px;
+    }
+
+    #preview-iframe {
+      display: none;
+      width: 100%;
+      height: 500px;
+      border: 0;
+    }
+
+    #download-link {
+      color: blue;
+      display: none;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="main">
+    <h2>Logseq Page Export OPML to HTML</h2>
+    <p>This tool converts OPML export of a <a href="https://logseq.com/">Logseq</a> page that contains an embedded
+      YouTube video and its corresponding notes to a
+      standalone HTML webpage that can be send to anyone. The timestamps in the notes webpage are all clickable.</p>
+    <p>LogSeq Page OPML:</p>
+    <textarea id="input" placeholder="Paste the OPML content copied from Logseq page export here..."
+      onclick="this.select()"></textarea>
+    <button type="button" onclick="displayHTML()">Convert</button>
+    <button type="button" onclick="preview()">Preview</button>
+    <button type="button" onclick="previewNewWindow()">Preview (New window)</button>
+    <button type="button" onclick="download()">Download</button>
+    <button type="button" onclick="insertSampleText()">Sample</button>
+    <a id="download-link">HTML file generated. Click here to download</a>
+    <p>HTML Output:</p>
+    <textarea id="output" onclick="this.select()"></textarea>
+    <p>Preview:</p>
+    <iframe id="preview-iframe"></iframe>
+  </div>
+
+  <script>
+
+    /**
+     * Parse string input in Logseq OPML format to retrieve YouTube's video Id.
+     * Given input "{{video(https://www.youtube.com/watch?v=oBtKHwFBn0k)}}" it will return "oBtKHwFBn0k"
+     */
+    function getVideoId(str) {
+      var groups = str.match(/v=(\S+)\)/);
+      var video_id = groups[1];
+      return video_id;
+    }
+
+    /**
+     * Parse string input in Logseq OPML format to retrieve YouTube's video timestamp, formatted timestamp for easier reading and notes.
+     * Given input "{{youtube-timestamp(267)}} sample note" it will return
+     * "<dt><a onclick=seekTo(267})>04:27</a></dt><dd>How to structure?</dd>"
+     */
+    function getNote(str) {
+      var groups = str.match(/^{{youtube-timestamp\((\d+)\)}}(.*?)$/);
+      var timestamp = groups[1];
+      var note_text = groups[2];
+      var formatted_timestamp = ''
+      if (timestamp < 3600) {
+        formatted_timestamp = new Date(timestamp * 1000).toISOString().substring(14, 19)
+      } else {
+        formatted_timestamp = new Date(timestamp * 1000).toISOString().substring(11, 16)
+      }
+      var note = `<dt><a onclick=seekTo(${timestamp})>${formatted_timestamp}</a></dt><dd>${note_text}</dd>\n`;
+      return note
+    }
+
+    /**
+     * Parse string input in OPML format and return javascript object.
+     */
+    function parseOPML(opml_str) {
+      var parser = new DOMParser();
+      var opml_obj = parser.parseFromString(opml_str, "text/xml");
+      return opml_obj;
+    }
+
+    /**
+     * Generate HTML webpage with youtube timestamps from string input in Logseq OPML format.
+     */
+    function convertOPMLtoHTML(opml_text) {
+      var html_text = `<!DOCTYPE html>
+        <html>
+
+        <head>
+          <meta charset="UTF-8">
+          <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ctext%20x='0'%20y='14'%3E🗒️%3C/text%3E%3C/svg%3E" type="image/svg+xml" />
+          <title>Notes</title>
+          <style>
+            body {
+              font-family: Helvetica, Arial, sans-serif;
+              background-color: rgb(250, 250, 250);
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 100%;
+            }
+
+            #main {
+              margin: auto;
+              width: 640px;
+            }
+
+            a {
+              color: blue;
+              cursor: pointer;
+            }
+
+            dt {
+              display: list-item;
+              list-style-type: disc;
+              float: left;
+              width: 10%;
+              padding: 0;
+              margin: 0;
+            }
+
+            dd {
+              text-align: justify;
+              float: left;
+              width: 90%;
+              padding: 0;
+              margin: 0;
+            }
+          </style>
+        </head>
+
+        <body>
+          <div id="main">
+            <div id="player"></div>
+            <dl id="notes">
+              ___NOTE_ITEMS___
+            </dl>
+          </div>
+          <script>
+            var tag = document.createElement('script');
+            tag.src = "https://www.youtube.com/iframe_api";
+            var firstScriptTag = document.getElementsByTagName('script')[0];
+            firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+            var player;
+            function onYouTubeIframeAPIReady() {
+              player = new YT.Player('player', {
+                height: '390',
+                width: '640',
+                videoId: '___VIDEO_ID___',
+                playerVars: {
+                  'playsinline': 1
+                }
+              });
+            }
+            function seekTo(time) {
+              player.seekTo(time);
+            }
+          <\/script>
+        </body>
+        </html>`;
+      // Line 186 above for some reason requires a backslash for escaping the slash character
+      // without it Chrome thinks its the end of script tag even though its within multiline string
+
+      var doc = parseOPML(opml_text);
+      var outlines = doc.getElementsByTagName('outline');
+      var note_items = '';
+      for (var i = 0, max = outlines.length; i < max; i++) {
+        curr = outlines[i];
+        text = curr.getAttribute('text');
+        if (text.startsWith('{{video')) {
+          video_id = getVideoId(text);
+          html_text = html_text.replace('___VIDEO_ID___', video_id);
+        } else if (text.startsWith('{{youtube-timestamp')) {
+          note_items += getNote(text);
+        }
+      }
+      html_text = html_text.replace('___NOTE_ITEMS___', note_items);
+      return html_text
+    }
+
+    /**
+     * Read OPML from input textarea and convert to HTML.
+     */
+    function convertInput() {
+      input_text = document.getElementById("input").value;
+      output_text = convertOPMLtoHTML(input_text);
+      return output_text;
+    }
+
+    /**
+     * Display HTML output in textarea.
+     */
+    function displayHTML() {
+      output = convertInput();
+      document.getElementById("output").value = output;
+    }
+
+    /**
+     * Show preview of webpage in an iFrame.
+     */
+    function preview() {
+      output = convertInput();
+      var iframe = document.getElementById("preview-iframe");
+      iframe.src = "data:text/html;charset=utf-8," + escape(output);
+      iframe.style.display = "block";
+    }
+
+    /**
+     * Show preview of webpage in a new browser Window.
+     */
+    function previewNewWindow() {
+      output = convertInput();
+      const winUrl = URL.createObjectURL(new Blob([output], { type: "text/html" }));
+      const win = window.open(
+        winUrl,
+        "preview"
+      );
+    }
+
+    /**
+     * Download webpage as note.html file.
+     */
+    function download() {
+      output = convertInput();
+      var file = new File([output], 'notes.html', { type: "application/octet-stream" });
+      var exportUrl = URL.createObjectURL(file);
+      var a = document.getElementById("download-link");
+      a.href = exportUrl;
+      a.download = 'notes.html';
+      a.style.display = 'block'
+    }
+
+    /**
+     * Inserts sampel text to input textarea.
+     */
+    function insertSampleText() {
+      var sample_text = `<?xml version="1.0" encoding="UTF-8"?>
+        <opml version="2.0">
+          <head>
+            <title>
+              untitled
+            </title>
+          </head>
+          <body>
+            <outline text="" _note="  &#10;"/>
+            <outline text="{{video(https://www.youtube.com/watch?v=oBtKHwFBn0k)}}"/>
+            <outline text="{{youtube-timestamp(39)}} Effective note taking. Effortless input and efficient retrieval" />
+            <outline text="{{youtube-timestamp(266)}} How to structure for efficient retrieval?" />
+          </body>
+        </opml>`
+      document.getElementById("input").value = sample_text;
+    }
+
+  </script>
+</body>
+
+</html>
